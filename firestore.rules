@@ -1,0 +1,90 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isMe(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isHouseholdMember(householdId) {
+      return isSignedIn() &&
+        request.auth.uid in get(/databases/$(database)/documents/households/$(householdId)).data.memberIds;
+    }
+
+    function isHouseholdOwner(householdId) {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/households/$(householdId)).data.members[request.auth.uid].role == 'owner';
+    }
+
+    // --- Users ---
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create: if isMe(uid);
+      allow update: if isMe(uid);
+      allow delete: if false;
+    }
+
+    // --- Households ---
+    match /households/{householdId} {
+      allow read: if isHouseholdMember(householdId);
+      allow create: if isSignedIn() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        request.resource.data.memberIds == [request.auth.uid];
+
+      // Members can update most fields (e.g. renaming); membership changes
+      // that add a *new* member are only ever performed by the acceptInvite
+      // Cloud Function (which runs with admin privileges and bypasses rules).
+      allow update: if isHouseholdMember(householdId) &&
+        request.resource.data.memberIds.size() <= resource.data.memberIds.size();
+      allow delete: if isHouseholdOwner(householdId);
+
+      match /categories/{categoryId} {
+        allow read, write: if isHouseholdMember(householdId);
+      }
+
+      match /inventory/{itemId} {
+        allow read, write: if isHouseholdMember(householdId);
+      }
+
+      match /shoppingList/{itemId} {
+        allow read, write: if isHouseholdMember(householdId);
+      }
+
+      match /chores/{choreId} {
+        allow read, write: if isHouseholdMember(householdId);
+      }
+    }
+
+    // --- Invites ---
+    // Created by any household member (inviting someone new), readable by the
+    // inviter's household and by the invitee (matched by email via a callable
+    // function, since Firestore rules can't compare auth email safely in all
+    // clients). Acceptance is handled server-side by acceptInvite.
+    match /invites/{inviteId} {
+      allow create: if isSignedIn() &&
+        isHouseholdMember(request.resource.data.householdId) &&
+        request.resource.data.invitedBy == request.auth.uid &&
+        request.resource.data.status == 'pending';
+
+      allow read: if isSignedIn() &&
+        (request.auth.token.email.lower() == resource.data.invitedEmail ||
+         isHouseholdMember(resource.data.householdId));
+
+      allow update: if isSignedIn() &&
+        isHouseholdMember(resource.data.householdId) &&
+        request.resource.data.status == 'revoked';
+
+      allow delete: if false;
+    }
+
+    // --- Email queue for the Trigger Email extension ---
+    match /mail/{mailId} {
+      allow read, write: if false; // written only by Cloud Functions (admin SDK)
+    }
+  }
+}
