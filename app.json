@@ -11,9 +11,11 @@
       "backgroundColor": "#FAF7F2"
     },
     "assetBundlePatterns": ["**/*"],
+    "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.hearth.app"
+      "bundleIdentifier": "com.hearth.app",
+      "usesAppleSignIn": true
     },
     "android": {
       "package": "com.hearth.app",
@@ -21,6 +23,7 @@
         "backgroundColor": "#FAF7F2"
       }
     },
+    "plugins": ["expo-apple-authentication"],
     "extra": {
       "eas": {
         "projectId": "your-eas-project-id"

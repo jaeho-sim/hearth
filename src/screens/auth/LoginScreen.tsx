@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { ScreenContainer } from '@/components/ScreenContainer';
 import { Button } from '@/components/Button';
-import { colors, spacing, typography } from '@/theme';
+import { colors, radii, spacing, typography } from '@/theme';
 import { googleAuthConfig } from '@/config/googleAuth';
-import { signInWithGoogleIdToken } from '@/services/authService';
+import { signInWithApple, signInWithGoogleIdToken } from '@/services/authService';
+import { createAppleNonce } from '@/utils/appleNonce';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -23,20 +25,52 @@ export function LoginScreen() {
 
   React.useEffect(() => {
     if (response?.type === 'success' && response.params.id_token) {
-      handleSignIn(response.params.id_token);
+      handleGoogleSignIn(response.params.id_token);
     } else if (response?.type === 'error') {
       setError('Google sign-in failed. Please try again.');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [response]);
 
-  async function handleSignIn(idToken: string) {
+  async function handleGoogleSignIn(idToken: string) {
     setSigningIn(true);
     setError(null);
     try {
       await signInWithGoogleIdToken(idToken);
     } catch (e) {
       setError('Something went wrong signing you in.');
+    } finally {
+      setSigningIn(false);
+    }
+  }
+
+  async function handleAppleSignIn() {
+    setSigningIn(true);
+    setError(null);
+    try {
+      const { rawNonce, hashedNonce } = await createAppleNonce();
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+
+      if (!credential.identityToken) {
+        throw new Error('Apple did not return an identity token.');
+      }
+
+      const fullName = credential.fullName
+        ? [credential.fullName.givenName, credential.fullName.familyName].filter(Boolean).join(' ')
+        : null;
+
+      await signInWithApple(credential.identityToken, rawNonce, fullName);
+    } catch (e: any) {
+      // ERR_REQUEST_CANCELED just means the user dismissed the sheet — not an error worth surfacing.
+      if (e?.code !== 'ERR_REQUEST_CANCELED') {
+        setError('Something went wrong signing you in with Apple.');
+      }
     } finally {
       setSigningIn(false);
     }
@@ -60,6 +94,15 @@ export function LoginScreen() {
           loading={signingIn}
           disabled={!googleAuthConfig.expoClientId && !googleAuthConfig.webClientId}
         />
+        {Platform.OS === 'ios' && (
+          <AppleAuthentication.AppleAuthenticationButton
+            buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+            buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+            cornerRadius={radii.md}
+            style={styles.appleButton}
+            onPress={handleAppleSignIn}
+          />
+        )}
         <Text style={styles.disclaimer}>By continuing you agree to share your name, email, and photo with your household members.</Text>
       </View>
     </ScreenContainer>
@@ -82,6 +125,7 @@ const styles = StyleSheet.create({
   title: { ...typography.h1, marginBottom: spacing.sm },
   subtitle: { ...typography.bodyMuted, textAlign: 'center', paddingHorizontal: spacing.lg },
   footer: { gap: spacing.md },
+  appleButton: { width: '100%', height: 48 },
   error: { color: colors.danger, textAlign: 'center', marginBottom: spacing.sm },
   disclaimer: { ...typography.caption, textAlign: 'center', marginTop: spacing.sm },
 });

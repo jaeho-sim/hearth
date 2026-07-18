@@ -6,7 +6,7 @@ A simple, clean house-management app: shared inventory, shopping list, and chore
 
 ## Features
 
-- Google sign-in (Firebase Auth)
+- Google sign-in and Sign in with Apple (Firebase Auth)
 - Households ("groups"): create one, invite others by email, they get an email invite and can join after signing in
 - Inventory with custom categories shown as tabs (Fridge, Freezer, Pantry, etc.) — each item has name, quantity, optional unit, optional expiration date, optional low-stock threshold, and notes
 - Shopping list with check-off
@@ -59,6 +59,8 @@ npx expo start
 
 Scan the QR code with Expo Go, or press `i` / `a` for a simulator.
 
+> **First install after pulling this repo:** the project targets Expo SDK 56 (React Native 0.85, React 19.2, React Navigation 7). After `npm install`, run `npx expo install --fix` once to let Expo resolve the exact compatible patch version of every `expo-*` and native package, then `npx expo-doctor` to confirm there are no mismatches before building.
+
 ## 4. Deploy Firestore rules & indexes
 
 ```bash
@@ -80,6 +82,25 @@ firebase deploy --only functions
 This deploys:
 - `onInviteCreated` — Firestore trigger that queues an invite email whenever a household owner invites someone (`src/services/inviteService.ts` on the client creates the `invites` doc).
 - `acceptInvite` — callable function the app invokes once a signed-in user taps "Join" on a pending invite; it verifies the invite matches their email and atomically adds them to the household.
+
+## 6. Enable Sign in with Apple (required for App Store submission)
+
+Apple's App Review Guideline 4.8 requires that any app offering third-party login (Google, here) also offer Sign in with Apple as an equivalent option. This repo already implements it (`expo-apple-authentication` + Firebase's `apple.com` OAuth provider, see `src/services/authService.ts` and the Apple button in `src/screens/auth/LoginScreen.tsx`) — you just need to turn it on in two places:
+
+1. **Firebase console** → Authentication → Sign-in method → enable **Apple**. No Services ID / private key is needed for the native flow used here (that's only required if you also want Apple sign-in on web or Android).
+2. **Apple Developer portal** → Certificates, Identifiers & Profiles → your App ID (`com.hearth.app`) → enable the **Sign In with Apple** capability. If you build with EAS-managed credentials, `eas build --platform ios` will offer to do this for you automatically the first time it needs the capability.
+
+The button only renders on iOS (`Platform.OS === 'ios'`), matching Apple's own guidance not to show it on Android.
+
+## Publishing to the App Store
+
+1. Enroll in the [Apple Developer Program](https://developer.apple.com/programs/) ($99/year).
+2. Add real app icon (1024×1024) and splash assets under `assets/`, and update `app.json`'s `icon`/`splash` paths if you rename them.
+3. Write a privacy policy (the app collects name, email, and photo via sign-in) and host it somewhere public — App Store Connect requires a URL for it.
+4. Create the app record in [App Store Connect](https://appstoreconnect.apple.com) with bundle ID `com.hearth.app`, and fill out the App Privacy questionnaire.
+5. Build: `eas build --platform ios --profile production` (profile already defined in `eas.json`).
+6. Submit: `eas submit --platform ios`.
+7. In App Review notes, mention that reviewers can sign in with their own Apple ID via Sign in with Apple — no demo account needed.
 
 ## How the invite flow works
 
